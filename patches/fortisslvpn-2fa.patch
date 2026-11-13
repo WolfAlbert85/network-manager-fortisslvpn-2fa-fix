@@ -1,0 +1,71 @@
+--- a/src/nm-fortisslvpn-service.c
++++ b/src/nm-fortisslvpn-service.c
+@@ -331,7 +331,12 @@
+ {
+ 	NMFortisslvpnPlugin *plugin = NM_FORTISSLVPN_PLUGIN (user_data);
+ 	NMFortisslvpnPluginPrivate *priv = NM_FORTISSLVPN_PLUGIN_GET_PRIVATE (plugin);
+-	const char *hints[] = { arg_hint, NULL };
++	const gboolean is_custom_2fa =
++    		g_str_has_suffix (arg_hint, "_2fa");
++	const char *hints[] = {
++    		is_custom_2fa ? NM_FORTISSLVPN_KEY_OTP : arg_hint,
++    		NULL
++	};
+ 
+ 	_LOGI ("FORTISSLVPN service (%s) password request received.", arg_hint);
+ 
+@@ -343,12 +348,18 @@
+ 		return TRUE;
+ 	}
+ 
+-	if (strcmp (arg_hint, NM_FORTISSLVPN_KEY_OTP) == 0) {
++	if (strcmp (arg_hint, NM_FORTISSLVPN_KEY_OTP) == 0  ||
++    is_custom_2fa) {
+ 		NMSettingSecretFlags flags = NM_SETTING_SECRET_FLAG_NONE;
+ 		NMSetting *s_vpn = nm_connection_get_setting (priv->connection, NM_TYPE_SETTING_VPN);
+ 
+ 		g_return_val_if_fail (NM_IS_SETTING_VPN (s_vpn), FALSE);
+-		nm_setting_get_secret_flags (s_vpn, arg_hint, &flags, NULL);
++		nm_setting_get_secret_flags (
++    			s_vpn,
++    			is_custom_2fa ? NM_FORTISSLVPN_KEY_OTP : arg_hint,
++    			&flags,
++    			NULL
++		);
+ 		if ((flags & NM_SETTING_SECRET_FLAG_NOT_SAVED) == 0) {
+ 			g_dbus_method_invocation_return_error (invocation,
+ 			                                       NMV_EDITOR_PLUGIN_ERROR,
+@@ -557,7 +568,12 @@
+ 		goto out;
+ 	}
+ 
+-	pin = nm_setting_vpn_get_secret (s_vpn, hint);
++	pin = nm_setting_vpn_get_secret (
++    		s_vpn,
++    		g_str_has_suffix (hint, "_2fa")
++        	? NM_FORTISSLVPN_KEY_OTP
++        	: hint
++	);
+ 	if (!pin) {
+ 		g_dbus_method_invocation_return_error (priv->get_pin_invocation,
+ 		                                       NMV_EDITOR_PLUGIN_ERROR,
+--- a/auth-dialog/main.c
++++ b/auth-dialog/main.c
+@@ -210,7 +210,7 @@
+ 		nma_vpn_password_dialog_set_password (dialog, pw);
+ 
+ 	gtk_widget_show (GTK_WIDGET (dialog));
+-
++	gtk_window_set_modal (GTK_WINDOW (dialog), FALSE);
+ 	if (nma_vpn_password_dialog_run_and_block (dialog)) {
+ 		new_password = nma_vpn_password_dialog_get_password (dialog);
+ 		if (new_password)
+--- a/nm-fortisslvpn-service.name.in
++++ b/nm-fortisslvpn-service.name.in
+@@ -10,5 +10,5 @@
+ [GNOME]
+ auth-dialog=@LIBEXECDIR@/nm-fortisslvpn-auth-dialog
+ properties=@PLUGINDIR@/libnm-fortisslvpn-properties
+-supports-external-ui-mode=true
++supports-external-ui-mode=false
+ supports-hints=true
